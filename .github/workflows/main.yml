@@ -1,0 +1,80 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+jobs:
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set Up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Set Up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '22'
+
+      - name: Set Up Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Build Android App
+        run: |
+          cd android
+          ./gradlew assembleRelease
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set Up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install CocoaPods
+        run: |
+          sudo gem install cocoapods
+          cd ios
+          pod install
+
+      - name: Set Up Signing Certificates
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "${{ secrets.IOS_PROFILE }}" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/App.mobileprovision
+          echo "${{ secrets.IOS_CERTIFICATE }}" | base64 --decode > ios_distribution.cer
+          security create-keychain -p "" build.keychain
+          security import ios_distribution.cer -k build.keychain -T /usr/bin/codesign
+          security import <(echo "${{ secrets.IOS_KEY }}") -k build.keychain -P "${{ secrets.IOS_KEY_PASSWORD }}" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+
+      - name: Build iOS App
+        run: |
+          cd ios
+          xcodebuild -workspace YourApp.xcworkspace -scheme YourApp -configuration Release -sdk iphoneos -archivePath $PWD/build/YourApp.xcarchive archive
+          xcodebuild -exportArchive -archivePath $PWD/build/YourApp.xcarchive -exportOptionsPlist exportOptions.plist -exportPath $PWD/build
+
